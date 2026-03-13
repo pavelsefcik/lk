@@ -175,21 +175,49 @@ def main():
 
     if command == "add":
         if len(args) < 4:
-            print(
-                "Usage: python snippetti.py add <address> <title> <description> [tag1 tag2 ...]"
-            )
-            return
-        address = args[1]
-        title = args[2]
-        description = args[3]
-        tags = args[4:]
+            print('Let\'s add a new snippet. Type "quit" or press Ctrl+C to cancel.\n')
+            try:
+                address = input("Address (path or URL): ").strip()
+                if address.lower() in ("quit", "exit"):
+                    print("Cancelled.")
+                    return
+                title = input("Title: ").strip()
+                if title.lower() in ("quit", "exit"):
+                    print("Cancelled.")
+                    return
+                description = input("Description: ").strip()
+                if description.lower() in ("quit", "exit"):
+                    print("Cancelled.")
+                    return
+                tags_input = input("Tags (space-separated, or leave blank): ").strip()
+                if tags_input.lower() in ("quit", "exit"):
+                    print("Cancelled.")
+                    return
+                tags = tags_input.split() if tags_input else []
+            except KeyboardInterrupt:
+                print("\nCancelled.")
+                return
+        else:
+            address = args[1]
+            title = args[2]
+            description = args[3]
+            tags = args[4:]
         cmd_add(address, title, description, tags)
 
     elif command == "search":
         if len(args) < 2:
-            print("Usage: python snippetti.py search <query>")
-            return
-        cmd_search(" ".join(args[1:]))
+            print('What are you looking for? Type "quit" or press Ctrl+C to cancel.\n')
+            try:
+                query = input("Search: ").strip()
+                if not query or query.lower() in ("quit", "exit"):
+                    print("Cancelled.")
+                    return
+            except KeyboardInterrupt:
+                print("\nCancelled.")
+                return
+        else:
+            query = " ".join(args[1:])
+        cmd_search(query)
 
     elif command == "list":
         cmd_list()

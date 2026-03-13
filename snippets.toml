@@ -8,3 +8,10 @@ tags = [
     "python",
     "experiments",
 ]
+
+[[snippets]]
+id = "2"
+title = "Mein Architekturportfolio - Layouts"
+address = "/Users/pavel/Documents/Portfolio"
+description = "Mein Architekturportfolio mit alle Indesign und Affinity Layouts und Bibliotheken"
+tags = []
