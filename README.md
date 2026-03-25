@@ -7,33 +7,22 @@ A minimal folder bookmarking tool for the terminal.
 - `lk /some/path` — save a folder with a title and description
 - `lk something` — search your saved folders and open the chosen one in Finder
 
+Supports regular paths, `~` paths, and `smb://` network share URLs.
+
 ## Setup
 
-### 1. Copy the helper script to your home folder
+### 1. Copy the files to `~/.lk`
 
 ```bash
-cp /path/to/lk_helper.py ~/.lk_helper.py
+mkdir -p ~/.lk
+cp lk_helper.py ~/.lk/
+cp lk.zsh ~/.lk/
 ```
 
-The file can be copied from anywhere — Downloads, Desktop, wherever you saved it.
-
-### 2. Add the following to your `~/.zshrc`
+### 2. Add one line to `~/.zshrc`
 
 ```zsh
-lk() {
-  local arg="$*"
-
-  if [[ "$arg" == /* ]] || [[ "$arg" == ~* ]] || [[ "$arg" == Users/* ]] || [[ "$arg" == Volumes/* ]]; then
-    python3 ~/.lk_helper.py add "$arg"
-  else
-    rm -f ~/.lk_result
-    python3 ~/.lk_helper.py search "$arg" </dev/tty >/dev/tty
-    if [[ -f ~/.lk_result ]]; then
-      open "$(cat ~/.lk_result)"
-      rm ~/.lk_result
-    fi
-  fi
-}
+source ~/.lk/lk.zsh
 ```
 
 ### 3. Reload your shell
@@ -48,7 +37,6 @@ source ~/.zshrc
 ```
 lk /Volumes/Work/Projects/MyProject
 ```
-You will be prompted:
 ```
 Saving: /Volumes/Work/Projects/MyProject
 Title: My Project
@@ -61,19 +49,23 @@ Saved: My Project
 lk project
 ```
 ```
-  Results for: project
+  Results for project
 
-  1)  My Project
-      Main working folder
-      /Volumes/Work/Projects/MyProject
+  1  My Project
+     Main working folder
+     /Volumes/Work/Projects/MyProject
 
   Pick: 1
 ```
 Finder opens the chosen folder.
 
+Search is fuzzy — `lk proejct` or `lk work models` will still find the right entry.
+
 ## Data
 
-Your bookmarks are stored in `~/.lk_data.json` — plain JSON, human-readable, easy to back up or edit by hand.
+Bookmarks are stored in `~/.lk/lk_data.json` — plain JSON, easy to back up or edit by hand.
+
+To open it directly: `lk_data`
 
 ## Dependencies
 
