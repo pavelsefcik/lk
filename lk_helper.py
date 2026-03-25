@@ -9,6 +9,7 @@ Usage:
 import sys
 import json
 import os
+import subprocess
 from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlparse, unquote
@@ -20,7 +21,6 @@ RESET     = "\033[0m"
 
 LK_DIR = Path.home() / ".lk"
 DATA_FILE = LK_DIR / "lk_data.json"
-RESULT_FILE = LK_DIR / "lk_result"
 
 
 def load():
@@ -44,23 +44,28 @@ def normalize_path(path_str):
 
 
 def cmd_add(path_str):
-    normalized = normalize_path(path_str)
-    p = Path(normalized).resolve()
+    is_url = path_str.startswith(("http://", "https://"))
+
+    if is_url:
+        stored = path_str
+    else:
+        normalized = normalize_path(path_str)
+        stored = str(Path(normalized).resolve())
 
     entries = load()
     for e in entries:
-        if e["path"] == str(p):
-            print(f"Already saved: {e['title']} -> {p}", file=sys.stderr)
+        if e["path"] == stored:
+            print(f"Already saved: {e['title']} -> {stored}", file=sys.stderr)
             sys.exit(1)
 
-    print(f"\nSaving: {p}", file=sys.stderr)
+    print(f"\nSaving: {stored}", file=sys.stderr)
     title = input("Title: ").strip()
     if not title:
         print("Cancelled.", file=sys.stderr)
         sys.exit(1)
     description = input("Description (optional): ").strip()
 
-    entries.append({"path": str(p), "title": title, "description": description})
+    entries.append({"path": stored, "title": title, "description": description})
     save(entries)
     print(f"Saved: {title}", file=sys.stderr)
 
@@ -95,7 +100,13 @@ def cmd_search(query):
         choice = input("  Pick: ").strip()
         idx = int(choice) - 1
         if 0 <= idx < len(matches):
-            RESULT_FILE.write_text(matches[idx]["path"])
+            path = matches[idx]["path"]
+            if path.startswith(("http://", "https://")):
+                subprocess.run(["/usr/bin/open", path])
+            elif os.path.isfile(path):
+                subprocess.run(["/usr/bin/open", "-R", path])
+            else:
+                subprocess.run(["/usr/bin/open", path])
             print("", file=sys.stderr)
         else:
             print("Invalid choice.", file=sys.stderr)
@@ -106,10 +117,6 @@ def cmd_search(query):
 
 
 if __name__ == "__main__":
-    # Remove result file from previous runs
-    if RESULT_FILE.exists():
-        RESULT_FILE.unlink()
-
     args = sys.argv[1:]
     if not args:
         print(__doc__)
@@ -117,7 +124,7 @@ if __name__ == "__main__":
 
     input_str = " ".join(args)
 
-    if input_str.startswith(("smb://", "/", "./", "../", "~")):
+    if input_str.startswith(("http://", "https://", "smb://", "/", "./", "../", "~")):
         cmd_add(input_str)
     else:
         cmd_search(input_str)

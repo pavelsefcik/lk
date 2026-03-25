@@ -1,13 +1,16 @@
 # lk
 
-A minimal folder bookmarking tool for the terminal.
+A minimal bookmarking tool for the terminal — save folders, files, and URLs, then find and open them with a fuzzy search.
 
 ## What it does
 
-- `lk /some/path` — save a folder with a title and description
-- `lk something` — search your saved folders and open the chosen one in Finder
+- `lk /some/path` — save a folder or file with a title and description
+- `lk https://example.com` — save a URL bookmark
+- `lk something` — search your saved bookmarks and open the chosen one
 
-Supports regular paths, `~` paths, and `smb://` network share URLs.
+Supports regular paths, `~` paths, `smb://` network share URLs, and `http(s)://` URLs.
+
+When opening a **file**, Finder reveals it in its containing folder. When opening a **folder**, Finder opens it directly. When opening a **URL**, it opens in your default browser.
 
 ## Setup
 
@@ -42,6 +45,17 @@ Saving: /Volumes/Work/Projects/MyProject
 Title: My Project
 Description (optional): Main working folder
 Saved: My Project
+```
+
+**Save a URL:**
+```
+lk https://github.com/pavelsefcik/lk
+```
+```
+Saving: https://github.com/pavelsefcik/lk
+Title: GitHub lk
+Description (optional): lk repository
+Saved: GitHub lk
 ```
 
 **Search and open:**
