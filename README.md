@@ -79,7 +79,7 @@ Search is fuzzy — `lk proejct` or `lk work models` will still find the right e
 
 Bookmarks are stored in `~/.lk/lk_data.json` — plain JSON, easy to back up or edit by hand.
 
-To open it directly: `lk_data`
+To open it directly: `lk -d` or `lk --data`
 
 ## Dependencies
 
