@@ -1,0 +1,38 @@
+# err 0.2 configuration
+# Copy this file and edit to taste. All settings have sensible defaults
+# except model_path, which is required.
+
+# ── required ────────────────────────────────────────────────────────
+
+# Path to your GGUF model
+model_path = /some/path/model-name.gguf
+
+# ── prompts ─────────────────────────────────────────────────────────
+
+# Prompt used when the command succeeded (exit 0)
+prompt_success = In 1 short sentence: what does this command do?
+
+# Prompt used when the command failed (exit != 0)
+prompt_fail = In one or few short sentences: what went wrong? If it looks like a typo, say so.
+
+# ── model parameters ────────────────────────────────────────────────
+
+# Enable thinking/reasoning (off for snappy answers, on for thinking models)
+thinking = off
+
+# Maximum tokens in the response
+max_tokens = 100
+
+# Sampling temperature (0 = deterministic, higher = more creative)
+temperature = 0.7
+
+# ── server ──────────────────────────────────────────────────────────
+
+# Port for the llama.cpp server
+port = 8080
+
+# Number of GPU layers to offload (99 = all, 0 = CPU only)
+gpu_layers = 99
+
+# Extra flags passed to llama-server (space-separated)
+server_extra_flags =
