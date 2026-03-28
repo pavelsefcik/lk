@@ -19,7 +19,7 @@ A terminal bookmark manager with a TUI — save folders, files, and URLs, then f
 **Requirements:** Python 3, [Textual](https://github.com/Textualize/textual), macOS (uses Finder integration)
 
 **Setup:**
-1. `pip install -r lk/requirements.txt`
+1. `pip install textual` (if not already installed)
 2. Add `source /path/to/lk/lk.zsh` to your `~/.zshrc`
 
 **Usage:**
