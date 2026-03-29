@@ -1,4 +1,4 @@
-# err 0.2 — thin shell shim (hooks + Python handoff)
+# err 0.3 — thin shell shim (hooks + Python handoff)
 # Configuration lives in err.conf next to this file.
 
 _err_last_cmd=""

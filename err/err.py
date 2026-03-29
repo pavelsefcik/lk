@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""err 0.2 — explains your last shell command using a local llama.cpp model."""
+"""err 0.3 — explains your last shell command or answers questions using a local llama.cpp model."""
 
 import json
 import os
@@ -11,7 +11,6 @@ import urllib.error
 import urllib.request
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TMPDIR = os.environ.get("TMPDIR", "/tmp").rstrip("/")
 
 # ── config ──────────────────────────────────────────────────────────
 
@@ -54,10 +53,12 @@ LLAMA_BIN = os.environ.get("LLAMA_BIN", "llama-server")
 
 HELP = """\
 
-ERR 0.2 // explains the last command using a local LLM
+ERR 0.3 // explains the last command or answers questions using a local LLM
 
 Usage:
-  err [-h|--help]
+  err                  Explain the last command
+  err <question>       Ask a shell/CLI question
+  err -h|--help        Show this help
 
 Exit codes explained:
   1     General error (catchall)
@@ -71,7 +72,7 @@ Exit codes explained:
 How it works:
   Run a command, then type `err`. It sends the command and exit code
   to a local llama.cpp server and streams a short explanation.
-  Optionally capture stderr: some-cmd 2>$TMPDIR/err_stderr; err
+  Optionally capture stderr: some-cmd 2>/tmp/err_stderr; err
 
 """
 
@@ -99,7 +100,7 @@ def ensure_running() -> bool:
         return False
 
     print("🚀 Starting llama.cpp server...")
-    log = open(f"{TMPDIR}/llama_server.log", "w")
+    log = open("/tmp/llama_server.log", "w")
 
     cmd = [
         LLAMA_BIN,
@@ -126,7 +127,7 @@ def ensure_running() -> bool:
             print("✅ llama.cpp ready")
             return True
 
-    print(f"❌ llama.cpp failed to start. Check {TMPDIR}/llama_server.log", file=sys.stderr)
+    print("❌ llama.cpp failed to start. Check /tmp/llama_server.log", file=sys.stderr)
     return False
 
 
@@ -196,6 +197,69 @@ def stream_response(cmd: str, exit_code: int, stderr_content: str) -> None:
         print(f"\n❌ Connection failed: {e.reason}", file=sys.stderr)
 
 
+# ── freeform question ─────────────────────────────────────────────
+
+
+def stream_question(question: str) -> None:
+    prompt = (
+        "You are a concise shell/CLI assistant. "
+        "Answer in a few short sentences. "
+        "Include a brief example command if relevant."
+    )
+
+    payload = json.dumps(
+        {
+            "model": "local",
+            "max_tokens": int(CFG["max_tokens"]),
+            "temperature": float(CFG["temperature"]),
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "stream": True,
+            "chat_template_kwargs": {"enable_thinking": CFG["thinking"] == "on"},
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": question},
+            ],
+        }
+    ).encode()
+
+    req = urllib.request.Request(
+        f"{LLAMA_HOST}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                    delta = chunk["choices"][0]["delta"].get("content", "")
+                    if delta:
+                        print(delta, end="", flush=True)
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+        print("\n")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        try:
+            err_msg = json.loads(body).get("error", body)
+        except json.JSONDecodeError:
+            err_msg = body
+        print(f"\n❌ Server error ({e.code}): {err_msg}", file=sys.stderr)
+    except urllib.error.URLError as e:
+        print(f"\n❌ Connection failed: {e.reason}", file=sys.stderr)
+
+
 # ── main ────────────────────────────────────────────────────────────
 
 
@@ -204,6 +268,16 @@ def main() -> None:
         print(HELP)
         return
 
+    # freeform question mode: err <question...>
+    if len(sys.argv) >= 2:
+        question = " ".join(sys.argv[1:])
+        print()
+        if not ensure_running():
+            sys.exit(1)
+        stream_question(question)
+        return
+
+    # default mode: explain last command
     cmd = os.environ.get("_ERR_LAST_CMD", "")
     exit_code_str = os.environ.get("_ERR_LAST_EXIT", "0")
 
@@ -223,7 +297,7 @@ def main() -> None:
         sys.exit(1)
 
     stderr_content = ""
-    stderr_file = f"{TMPDIR}/err_stderr"
+    stderr_file = "/tmp/err_stderr"
     if os.path.isfile(stderr_file) and os.path.getsize(stderr_file) > 0:
         with open(stderr_file) as f:
             stderr_content = f.read()

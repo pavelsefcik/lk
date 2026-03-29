@@ -99,7 +99,40 @@ def open_path(path):
     if path.startswith(("http://", "https://")):
         subprocess.run(["/usr/bin/open", path])
     elif os.path.isfile(path):
-        subprocess.run(["/usr/bin/open", "-R", path])
+        subprocess.run(["osascript", "-e", """
+            on run argv
+                set thePath to POSIX file (item 1 of argv) as alias
+                tell application "Finder"
+                    activate
+                    set theFolder to container of thePath
+                    if (count of Finder windows) > 0 then
+                        tell application "System Events" to keystroke "t" using command down
+                        delay 0.3
+                        set target of front Finder window to theFolder
+                        delay 0.1
+                        select thePath
+                    else
+                        reveal thePath
+                    end if
+                end tell
+            end run
+        """, path])
+    elif os.path.isdir(path):
+        subprocess.run(["osascript", "-e", """
+            on run argv
+                set thePath to POSIX file (item 1 of argv)
+                tell application "Finder"
+                    activate
+                    if (count of Finder windows) > 0 then
+                        tell application "System Events" to keystroke "t" using command down
+                        delay 0.3
+                        set target of front Finder window to thePath
+                    else
+                        open thePath
+                    end if
+                end tell
+            end run
+        """, path])
     else:
         subprocess.run(["/usr/bin/open", path])
 
@@ -138,6 +171,15 @@ class SearchInput(Input):
     class Submit(Message):
         pass
 
+    class EditBookmark(Message):
+        pass
+
+    class DeleteBookmark(Message):
+        pass
+
+    class MultiPick(Message):
+        pass
+
     def _on_key(self, event):
         if event.key == "down":
             event.prevent_default()
@@ -151,6 +193,18 @@ class SearchInput(Input):
             event.prevent_default()
             event.stop()
             self.post_message(self.Submit())
+        elif event.key == "ctrl+e":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.EditBookmark())
+        elif event.key == "ctrl+d":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.DeleteBookmark())
+        elif event.key == "ctrl+o":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.MultiPick())
         else:
             super()._on_key(event)
 
@@ -169,20 +223,36 @@ class BookmarkItem(Static):
     }
     """
 
-    def __init__(self, entry, index):
+    def __init__(self, entry, index, mark=None, mode=None):
         super().__init__()
         self.entry = entry
         self.index = index
+        self.mark = mark  # None=normal, True=marked, False=unmarked
+        self.mode = mode  # "delete", "multi", or None
 
-    def compose(self):
+    def _render_text(self):
         title = self.entry["title"]
         desc = self.entry.get("description", "")
         path = self.entry["path"]
-        lines = f"[bold]{self.index + 1}[/bold]  [bold]{title}[/bold]"
+        if self.mark is not None:
+            if self.mark:
+                indicator = "[bold red]✕[/bold red]" if self.mode == "delete" else "[bold green]✓[/bold green]"
+            else:
+                indicator = "[dim]·[/dim]"
+            lines = f" {indicator}  [bold]{title}[/bold]"
+        else:
+            lines = f"[bold]{self.index + 1}[/bold]  [bold]{title}[/bold]"
         if desc:
             lines += f"\n    [dim]{desc}[/dim]"
         lines += f"\n    [dim italic]{path}[/dim italic]"
-        yield Static(lines, markup=True)
+        return lines
+
+    def compose(self):
+        yield Static(self._render_text(), markup=True, id=f"bm-label-{self.index}")
+
+    def set_mark(self, mark):
+        self.mark = mark
+        self.query_one(f"#bm-label-{self.index}", Static).update(self._render_text())
 
 
 class MenuItem(Static):
@@ -227,17 +297,23 @@ class SaveApp(App):
         self.existing = existing
         self.result_title = None
         self.result_description = None
+        self.result_path = None
 
     def compose(self) -> ComposeResult:
         if self.existing:
             yield Static(
-                f"[bold yellow]Already saved:[/bold yellow] [dim]{self.stored_path}[/dim]\n"
-                f"  [dim]Edit title/description below or esc to cancel[/dim]",
+                f"[bold yellow]Editing bookmark[/bold yellow]",
                 id="header", markup=True,
             )
         else:
             yield Static(f"[bold]Saving:[/bold] [dim]{self.stored_path}[/dim]", id="header", markup=True)
         with Vertical(id="form"):
+            if self.existing:
+                yield Input(
+                    placeholder="Path / URL",
+                    value=self.stored_path,
+                    id="path",
+                )
             yield Input(
                 placeholder="Title (required)",
                 value=self.existing["title"] if self.existing else "",
@@ -251,10 +327,15 @@ class SaveApp(App):
         yield Static("  enter confirm   esc cancel", id="status")
 
     def on_mount(self):
-        self.query_one("#title", Input).focus()
+        if self.existing:
+            self.query_one("#path", Input).focus()
+        else:
+            self.query_one("#title", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted):
-        if event.input.id == "title":
+        if event.input.id == "path":
+            self.query_one("#title", Input).focus()
+        elif event.input.id == "title":
             title = event.value.strip()
             if title:
                 self.query_one("#description", Input).focus()
@@ -263,6 +344,8 @@ class SaveApp(App):
             if title:
                 self.result_title = title
                 self.result_description = event.value.strip()
+                if self.existing:
+                    self.result_path = self.query_one("#path", Input).value.strip()
                 self.exit()
 
     def action_quit(self):
@@ -298,6 +381,12 @@ class SearchApp(App):
         self._last_query = initial_query.strip()
         self._filter_timer = None
         self.chosen_path = None
+        self.chosen_paths = None
+        self.edit_entry = None
+        # modal mode state: "delete", "multi", or None
+        self._mode = None
+        self._marked = set()
+        self._confirming = False
 
     def compose(self) -> ComposeResult:
         yield SearchInput(placeholder="Search bookmarks...", value=self.initial_query, id="search")
@@ -308,6 +397,47 @@ class SearchApp(App):
         self.query_one("#search", SearchInput).focus()
         self._refresh_results()
 
+    # --- key handling: modal modes intercept all keys ---
+
+    def on_key(self, event):
+        if not self._mode:
+            return
+        key = event.key
+        event.stop()
+        event.prevent_default()
+        n = min(len(self.matches), self.MAX_VISIBLE)
+        if key == "down" and n:
+            self.selected_index = (self.selected_index + 1) % n
+        elif key == "up" and n:
+            self.selected_index = (self.selected_index - 1) % n
+        elif key == "space" and not self._confirming and n:
+            idx = self.selected_index
+            if idx in self._marked:
+                self._marked.discard(idx)
+            else:
+                self._marked.add(idx)
+            items = self.query("BookmarkItem")
+            if 0 <= idx < len(items):
+                items[idx].set_mark(idx in self._marked)
+            self._update_status()
+        elif key == "enter" and self._marked:
+            if self._mode == "delete":
+                if not self._confirming:
+                    self._confirming = True
+                    self._update_status()
+                else:
+                    self._do_delete()
+            elif self._mode == "multi":
+                self._do_multi_open()
+        elif key == "escape":
+            if self._confirming:
+                self._confirming = False
+                self._update_status()
+            else:
+                self._exit_mode()
+
+    # --- search mode handlers ---
+
     def on_search_input_navigate(self, event: SearchInput.Navigate):
         if self.matches:
             self.selected_index = (self.selected_index + event.direction) % len(self.matches)
@@ -316,6 +446,19 @@ class SearchApp(App):
         if self.matches and 0 <= self.selected_index < len(self.matches):
             self.chosen_path = self.matches[self.selected_index]["path"]
             self.exit()
+
+    def on_search_input_edit_bookmark(self, event: SearchInput.EditBookmark):
+        if self.matches and 0 <= self.selected_index < len(self.matches):
+            self.edit_entry = self.matches[self.selected_index]
+            self.exit()
+
+    def on_search_input_delete_bookmark(self, event: SearchInput.DeleteBookmark):
+        if self.matches:
+            self._enter_mode("delete")
+
+    def on_search_input_multi_pick(self, event: SearchInput.MultiPick):
+        if self.matches:
+            self._enter_mode("multi")
 
     def on_input_changed(self, event: Input.Changed):
         if self._filter_timer is not None:
@@ -336,6 +479,41 @@ class SearchApp(App):
         self.selected_index = 0
         self._refresh_results()
 
+    # --- modal modes (delete / multi-pick) ---
+
+    def _enter_mode(self, mode):
+        self._mode = mode
+        self._marked = set()
+        self._confirming = False
+        self.query_one("#search", SearchInput).disabled = True
+        self._refresh_results()
+
+    def _exit_mode(self):
+        self._mode = None
+        self._marked = set()
+        self._confirming = False
+        search = self.query_one("#search", SearchInput)
+        search.disabled = False
+        search.focus()
+        self._refresh_results()
+
+    def _do_delete(self):
+        paths_to_delete = {self.matches[i]["path"] for i in self._marked}
+        self.all_entries = [e for e in self.all_entries if e["path"] not in paths_to_delete]
+        persist(self.all_entries)
+        self._search_texts = build_search_texts(self.all_entries)
+        q = self.query_one("#search", SearchInput).value.strip()
+        self.matches = filter_entries(q, self.all_entries, self._search_texts)
+        self._last_query = q
+        self.selected_index = 0
+        self._exit_mode()
+
+    def _do_multi_open(self):
+        self.chosen_paths = [self.matches[i]["path"] for i in sorted(self._marked)]
+        self.exit()
+
+    # --- display ---
+
     def watch_selected_index(self, value):
         self._highlight()
 
@@ -344,15 +522,31 @@ class SearchApp(App):
         container.remove_children()
         visible = self.matches[:self.MAX_VISIBLE]
         for i, entry in enumerate(visible):
-            container.mount(BookmarkItem(entry, i))
+            mark = (i in self._marked) if self._mode else None
+            container.mount(BookmarkItem(entry, i, mark=mark, mode=self._mode))
         self.call_after_refresh(self._highlight)
+        self._update_status()
+
+    def _update_status(self):
         status = self.query_one("#status", Static)
         matched = len(self.matches)
         total = len(self.all_entries)
-        if matched > self.MAX_VISIBLE:
-            status.update(f" showing {self.MAX_VISIBLE} of {matched} matches ({total} total)   ↑↓ navigate   enter open   esc quit")
+        if self._mode == "delete":
+            n = len(self._marked)
+            if self._confirming:
+                status.update(f" [bold red]Delete {n} bookmark{'s' if n != 1 else ''}?[/bold red]   enter confirm   esc cancel")
+            else:
+                sel = f"  [bold]{n} selected[/bold]" if n else ""
+                status.update(f" ↑↓ navigate   space toggle   enter delete{sel}   esc back")
+        elif self._mode == "multi":
+            n = len(self._marked)
+            sel = f"  [bold]{n} selected[/bold]" if n else ""
+            status.update(f" ↑↓ navigate   space toggle   enter open all{sel}   esc back")
         else:
-            status.update(f" {matched}/{total} bookmarks   ↑↓ navigate   enter open   esc quit")
+            if matched > self.MAX_VISIBLE:
+                status.update(f" showing {self.MAX_VISIBLE} of {matched} matches ({total} total)   ↑↓ enter open   ^e edit   ^d delete   ^o multi   esc quit")
+            else:
+                status.update(f" {matched}/{total} bookmarks   ↑↓ enter open   ^e edit   ^d delete   ^o multi   esc quit")
 
     def _highlight(self):
         items = self.query("BookmarkItem")
@@ -364,7 +558,10 @@ class SearchApp(App):
                 item.remove_class("--selected")
 
     def action_quit(self):
-        self.exit()
+        if self._mode:
+            self._exit_mode()
+        else:
+            self.exit()
 
 
 # --- Help App ---
@@ -414,22 +611,30 @@ class ChooserApp(App):
 
     selected_index = reactive(0)
 
-    def __init__(self, finder_path):
+    def __init__(self, finder_path=None):
         super().__init__()
         self.finder_path = finder_path
         self.choice = None
-        self.options = [
-            ("  [bold]Save this path[/bold]", "save"),
+        self.options = []
+        if finder_path:
+            self.options.append(("  [bold]Save this path[/bold]", "save"))
+        self.options.extend([
             ("  [bold]Search bookmarks[/bold]", "search"),
             ("  [dim]Help[/dim]", "help"),
             ("  [dim]Exit[/dim]", "exit"),
-        ]
+        ])
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            f"\n  [bold]Finder path:[/bold] [dim]{self.finder_path}[/dim]\n",
-            id="header", markup=True,
-        )
+        if self.finder_path:
+            yield Static(
+                f"\n  [bold]Finder path:[/bold] [dim]{self.finder_path}[/dim]\n",
+                id="header", markup=True,
+            )
+        else:
+            yield Static(
+                f"\n  [dim]No Finder path selected[/dim]\n",
+                id="header", markup=True,
+            )
         with Vertical(id="menu"):
             for label, value in self.options:
                 yield MenuItem(label, value)
@@ -497,34 +702,56 @@ def cmd_add(path_str):
 
 
 def cmd_search(query=""):
-    entries = load()
-    if not entries:
-        print("No entries yet. Add one with: lk /some/path", file=sys.stderr)
-        sys.exit(1)
+    while True:
+        entries = load()
+        if not entries:
+            print("No entries yet. Add one with: lk /some/path", file=sys.stderr)
+            sys.exit(1)
 
-    app = SearchApp(entries, initial_query=query)
-    app.run()
+        app = SearchApp(entries, initial_query=query)
+        app.run()
 
-    if app.chosen_path:
-        open_path(app.chosen_path)
+        if app.chosen_path:
+            open_path(app.chosen_path)
+            break
+        elif app.chosen_paths:
+            for p in app.chosen_paths:
+                open_path(p)
+            break
+        elif app.edit_entry:
+            entry = app.edit_entry
+            existing = None
+            for e in entries:
+                if e["path"] == entry["path"]:
+                    existing = e
+                    break
+            if existing:
+                save = SaveApp(existing["path"], existing=existing)
+                save.run()
+                if save.result_title:
+                    existing["title"] = save.result_title
+                    existing["description"] = save.result_description or ""
+                    if save.result_path and save.result_path != existing["path"]:
+                        existing["path"] = resolve_stored(save.result_path)
+                    persist(entries)
+            query = ""
+            continue
+        else:
+            break
 
 
 def cmd_noargs():
     finder_path = get_finder_path()
 
-    if finder_path:
-        chooser = ChooserApp(finder_path)
-        chooser.run()
+    chooser = ChooserApp(finder_path)
+    chooser.run()
 
-        if chooser.choice == "save":
-            cmd_add(finder_path)
-        elif chooser.choice == "search":
-            cmd_search()
-        elif chooser.choice == "help":
-            cmd_help()
-        # else: exit
-    else:
+    if chooser.choice == "save" and finder_path:
+        cmd_add(finder_path)
+    elif chooser.choice == "search":
         cmd_search()
+    elif chooser.choice == "help":
+        cmd_help()
 
 
 def cmd_help():

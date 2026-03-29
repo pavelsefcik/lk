@@ -4,7 +4,7 @@ Small personal tools for the terminal.
 
 ## err
 
-Explains your last shell command using a local LLM (llama.cpp). Run a command, then type `err` to get a short explanation of what happened.
+Explains your last shell command using a local LLM (llama.cpp). Run a command, then type `err` to get a short explanation of what happened. You can also type `err <question>` to ask a shell/CLI question directly.
 
 **Requirements:** Python 3, [llama.cpp](https://github.com/ggml-org/llama.cpp) (`llama-server`), a GGUF model
 
